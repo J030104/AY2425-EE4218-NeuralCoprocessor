@@ -132,7 +132,7 @@ module tb_nn_v1_0;
 
   // Drive the Start signal to trigger the computation after initialization
   initial begin
-    repeat (5) @(posedge clk);  // Wait 5 clock cycles
+     repeat (5) @(posedge clk);  // Wait 5 clock cycles
     Start = 1'b0;
     @(posedge clk);
     Start = 1'b1;               // Raise Start BEFORE edge

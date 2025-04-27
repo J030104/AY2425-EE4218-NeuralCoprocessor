@@ -50,20 +50,21 @@ module neural_network_v1_0 #(
     localparam W_HID_COUNT    = (FEATURES + 1) * HIDDEN;     // total hidden layer weights (including bias for each neuron)
     localparam W_OUT_COUNT    = HIDDEN + 1;                  // total output layer weights (including bias)
     
-    localparam Idle           = 7'b1000000;
-    localparam Initialize     = 7'b0100000;
-    localparam Compute_Hidden = 7'b0010000;
-    localparam Wait_Hidden    = 7'b0001000;
-    localparam Compute_Output = 7'b0000100;
-    localparam Wait_Output    = 7'b0000010;
-    localparam Store          = 7'b0000001;
+    localparam Idle            = 8'b1000_0000;
+    localparam Initialize      = 8'b0100_0000;
+    localparam Wait_Initialize = 8'b0010_0000;
+    localparam Compute_Hidden  = 8'b0001_0000;
+    localparam Wait_Hidden     = 8'b0000_1000;
+    localparam Compute_Output  = 8'b0000_0100;
+    localparam Wait_Output     = 8'b0000_0010;
+    localparam Store           = 8'b0000_0001;
 
-    reg [6:0] state = Idle;
+    reg [7:0] state = Idle;
 
     reg [5:0] row;   // 0~63 (64 rows, 64 big loops)
     reg [2:0] col;   // 0~6  (at most 7 columns in the first stage)
     reg lookup_finished;
-    reg [17:0] acc [0:HIDDEN-1]; // Two more bits to ensure no overflow occurs
+    reg [15:0] acc [0:HIDDEN-1]; // Two more bits to ensure no overflow occurs
 
     reg [1:0] cnt;
     always @(posedge clk) begin
@@ -110,6 +111,10 @@ module neural_network_v1_0 #(
                     B_read_address_1 <= B_read_address_1 + 2;
                     B_read_address_2 <= B_read_address_2 + 2;
 
+                    state <= Wait_Initialize;
+                end
+                
+                Wait_Initialize: begin
                     state <= Compute_Hidden;
                 end
                 
