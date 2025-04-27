@@ -60,12 +60,11 @@ module tb_MLP_IP ();
         .M_AXIS_TREADY(M_AXIS_TREADY)
     );
 
-    reg [7:0] X     [0:N*FEATURES-1];
-    reg [7:0] W_hid [0:(FEATURES+1)*HIDDEN-1];
-    reg [7:0] W_out [0:HIDDEN];
-    reg [7:0] results [0:N-1];
-    reg [7:0] expected_labels [0:N-1];
-    // reg [8:0] i;
+    reg [width-1:0] X     [0:N*FEATURES-1];
+    reg [width-1:0] W_hid [0:(FEATURES+1)*HIDDEN-1];
+    reg [width-1:0] W_out [0:W_OUT_ENTRIES - 1];
+    reg [width-1:0] results [0:N-1];
+    reg [width-1:0] expected_labels [0:N-1];
     integer i;
 
     reg success = 1'b1;
@@ -98,7 +97,7 @@ module tb_MLP_IP ();
         i = 0;
         S_AXIS_TVALID = 1'b1; // data is ready at the input of the coprocessor.
         while (i < X_ENTRIES) begin
-            if(S_AXIS_TREADY) begin  // S_AXIS_TREADY is asserted by the coprocessor in response to S_AXIS_TVALID
+            if (S_AXIS_TREADY) begin  // S_AXIS_TREADY is asserted by the coprocessor in response to S_AXIS_TVALID
                 S_AXIS_TDATA = X[i]; // set the next data ready
                 i = i + 1;
             end
@@ -110,7 +109,7 @@ module tb_MLP_IP ();
         i = 0;
         S_AXIS_TVALID = 1'b1; // data is ready at the input of the coprocessor.
         while (i < W_HID_ENTRIES) begin
-            if(S_AXIS_TREADY) begin  // S_AXIS_TREADY is asserted by the coprocessor in response to S_AXIS_TVALID
+            if (S_AXIS_TREADY) begin  // S_AXIS_TREADY is asserted by the coprocessor in response to S_AXIS_TVALID
                 S_AXIS_TDATA = W_hid[i]; // set the next data ready
                 i = i + 1;
             end
@@ -122,7 +121,7 @@ module tb_MLP_IP ();
         i = 0;
         S_AXIS_TVALID = 1'b1; // data is ready at the input of the coprocessor.
         while (i < W_OUT_ENTRIES) begin
-            if(S_AXIS_TREADY) begin  // S_AXIS_TREADY is asserted by the coprocessor in response to S_AXIS_TVALID
+            if (S_AXIS_TREADY) begin  // S_AXIS_TREADY is asserted by the coprocessor in response to S_AXIS_TVALID
                 S_AXIS_TDATA = W_out[i]; // set the next data ready
                 if (i == W_OUT_ENTRIES - 1) S_AXIS_TLAST = 1'b1;
                 else S_AXIS_TLAST = 1'b0;
@@ -137,10 +136,15 @@ module tb_MLP_IP ();
         // Output RES
         i = 0;
         M_AXIS_TREADY = 1'b1;
-        while (M_AXIS_TLAST | ~M_AXIS_TLAST_prev) begin
+        // When curr is 0 and prev is 1, we shall exit the loop
+        // while (i < TOTAL_OUTPUT_COUNT) begin
+        while(M_AXIS_TLAST | ~M_AXIS_TLAST_prev) begin // receive data until the falling edge of M_AXIS_TLAST
             if (M_AXIS_TVALID) begin
                 results[i] = M_AXIS_TDATA;
                 i = i + 1;
+            end
+            if (i == TOTAL_OUTPUT_COUNT) begin
+                $display("End of output stream.");
             end
             #100;
         end
@@ -153,13 +157,16 @@ module tb_MLP_IP ();
             i = i + 1
         ) begin
             success = success & (results[i] == expected_labels[i]);
-            if (success) $display("Test Passed.");
-            else $display("Test Failed. i = %d, %h != %h",
-                          i,
-                          results[i],
-                          expected_labels[i]);
+            
+            if (results[i] != expected_labels[i]) begin
+               $display("Incorrect result : i = %d, %h != %h",
+                          i, results[i], expected_labels[i]);
+            end
         end
 
+        if (success) $display("Test Passed.");
+        else $display("Test Failed.");
+                
         $finish;
     end
 

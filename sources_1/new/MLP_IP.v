@@ -101,9 +101,9 @@ module MLP_IP #(
    (* keep = "true" *) wire [$clog2(W_OUT_COUNT)-1:0]    Wo_read_addr_2;
    (* keep = "true" *) wire [DATA_WIDTH-1:0]     Wo_read_data_2;
     // Result memory (RES_RAM): stores N results (predictions)
-    wire                     RES_write_en;
-    wire  [N_BITS-1:0]       RES_write_addr;
-    wire  [DATA_WIDTH-1:0]   RES_write_data;
+    wire                    RES_write_en;
+    wire  [N_BITS-1:0]      RES_write_addr;
+    wire  [DATA_WIDTH-1:0]  RES_write_data;
     reg                     RES_read_en;
     reg  [N_BITS-1:0]       RES_read_addr;
     wire [DATA_WIDTH-1:0]   RES_read_data;
@@ -180,15 +180,6 @@ module MLP_IP #(
         .RES_write_en(RES_write_en), .RES_write_address(RES_write_addr), .RES_write_data_in(RES_write_data)
     );
 
-    // // Register for sigmoid LUT (256 entries)
-    // reg [7:0] sigmoid_LUT [0:255];
-    // initial begin
-    //     // Initialize the sigmoid lookup table (same values as in HLS code)
-    //     sigmoid_LUT[  0] = 8'd12;  sigmoid_LUT[  1] = 8'd12;  // ... (omitted for brevity)
-    //     // [Initialize all values 0..255 accordingly]
-    //     sigmoid_LUT[252] = 8'd243; sigmoid_LUT[253] = 8'd243; sigmoid_LUT[254] = 8'd243; sigmoid_LUT[255] = 8'd243;
-    // end
-
     reg [1:0] read_state = 2'b00;
 
     // Active-low synchronous reset and FSM
@@ -207,9 +198,9 @@ module MLP_IP #(
         end else begin
             // Default de-assert memory write enables each cycle (except when writing)
             X_write_en <= 0; Wh_write_en <= 0; Wo_write_en <= 0;
-            X_write_addr <= X_write_addr;
-            Wh_write_addr <= Wh_write_addr;
-            Wo_write_addr <= Wo_write_addr;
+            // X_write_addr <= X_write_addr;
+            // Wh_write_addr <= Wh_write_addr;
+            // Wo_write_addr <= Wo_write_addr;
             X_write_data <= 0;
             Wh_write_data <= 0;
             Wo_write_data <= 0;
@@ -228,6 +219,7 @@ module MLP_IP #(
                     if (S_AXIS_TVALID == 1) begin
                         state         <= ST_READ_INPUTS;
                         S_AXIS_TREADY <= 1'b1;
+                        read_state <= 0;
                         // Start receiving data
                     end
                 end
@@ -235,27 +227,6 @@ module MLP_IP #(
                 ST_READ_INPUTS: begin
                     // Accept all TOTAL_INPUT_COUNT words from S_AXIS
                     if (S_AXIS_TVALID && S_AXIS_TREADY) begin
-                        // Latch incoming data byte (LSB of TDATA)
-                        // Determine which memory to write based on counters
-//                        if (count_in_X < N * FEATURES) begin
-//                            // Write to X_RAM
-//                            X_write_en   <= 1'b1;
-//                            X_write_addr <= count_in_X;
-//                            X_write_data <= S_AXIS_TDATA[7:0];
-//                            count_in_X   <= count_in_X + 1;
-//                        end else if (count_in_Wh < W_HID_COUNT) begin
-//                            // Write to Wh_RAM (hidden weights)
-//                            Wh_write_en   <= 1'b1;
-//                            Wh_write_addr <= count_in_Wh;
-//                            Wh_write_data <= S_AXIS_TDATA[7:0];
-//                            count_in_Wh   <= count_in_Wh + 1;
-//                        end else if (count_in_Wo < W_OUT_COUNT) begin
-//                            // Write to Wo_RAM (output weights)
-//                            Wo_write_en   <= 1'b1;
-//                            Wo_write_addr <= count_in_Wo;
-//                            Wo_write_data <= S_AXIS_TDATA[7:0];
-//                            count_in_Wo   <= count_in_Wo + 1;
-//                        end
                         case (read_state)
                             2'b00: begin
                                 // Write to X_RAM
@@ -287,23 +258,20 @@ module MLP_IP #(
                                 Wo_write_en   <= 1'b1;           
                                 Wo_write_addr <= count_in_Wo;    
                                 Wo_write_data <= S_AXIS_TDATA[7:0];
-                                if (count_in_Wo == N * FEATURES - 1) begin
-                                    read_state <= read_state + 1;
+                                if (count_in_Wo == W_OUT_COUNT - 1) begin
+                                    if (S_AXIS_TLAST == 1) read_state <= read_state + 1;
+                                    // otherwise, this is an error
                                 end else begin
                                     count_in_Wo <= count_in_Wo + 1;
                                 end
                             end
                         endcase
-    
-                        // ? Should check if the TLAST can cause error
-                        // Check if we reached the end of all inputs
-                        // When the counters reach their limits, we know the transmission is complete.
-//                        if ((count_in_X == N * FEATURES) && (count_in_Wh == W_HID_COUNT) && (count_in_Wo == W_OUT_COUNT) && S_AXIS_TLAST) begin
-                        if (read_state == 2'b11) begin
-                            S_AXIS_TREADY <= 1'b0;
-                            Start <= 1'b1;
-                            state <= ST_COMPUTE;
-                        end
+                    end
+                    
+                    if (read_state == 2'b11) begin
+                        S_AXIS_TREADY <= 1'b0;
+                        Start <= 1'b1;
+                        state <= ST_COMPUTE;
                     end
                 end
                 //-------------------------------------
@@ -312,7 +280,7 @@ module MLP_IP #(
                         M_AXIS_TVALID <= 0;
                         RES_read_en   <= 1;
                         RES_read_addr <= 0;
-                        RES_fetch     <= 1;
+                        RES_fetch     <= 1; // ?
                         state         <= ST_WRITE_OUT;
                     end
                 end
@@ -322,9 +290,9 @@ module MLP_IP #(
                         M_AXIS_TVALID <= 0;
                         // Fetch element from result RAM
                         RES_read_en <= 1;
-                        RES_fetch <= 1;
+                        RES_fetch <= RES_fetch + 1;
                     end else if (RES_fetch == 1) begin  // Waiting cycle
-                        RES_fetch <= 2;
+                        RES_fetch <= RES_fetch + 1;
                     end else begin
                         RES_fetch <= 0;  // Signal that we need to fetch a new element
     
@@ -338,31 +306,12 @@ module MLP_IP #(
                                 // M_AXIS_TLAST, though optional in AXIS, is necessary in practice as AXI Stream FIFO and AXI DMA expects it.
                             end else begin
                                 RES_read_addr <= RES_read_addr + 1;
+                                M_AXIS_TLAST  <= 0;
                             end
+                        end else begin // ? if the main processor is not ready, we will wait one more time
+                            RES_fetch <= RES_fetch + 1;
                         end
                     end
-    
-                    // // Stream out the results stored in RES_RAM
-                    // if (!M_AXIS_TVALID || (M_AXIS_TVALID && M_AXIS_TREADY)) begin
-                    //     // If ready or just starting, put next result on the bus
-                    //     M_AXIS_TDATA[7:0] <= RES_read_data;
-                    //     M_AXIS_TVALID <= 1'b1;
-                    //     // Mark last transfer when reaching final sample
-                    //     if (RES_read_addr == N-1) begin
-                    //         M_AXIS_TLAST <= 1'b1;
-                    //     end else begin
-                    //         M_AXIS_TLAST <= 1'b0;
-                    //     end
-                    //     // Move to next result
-                    //     RES_read_en   <= 1'b1;
-                    //     RES_read_addr <= RES_read_addr + 1;
-                    // end
-                    // // After transmitting the last result, go back to IDLE
-                    // if (M_AXIS_TVALID && M_AXIS_TLAST && M_AXIS_TREADY) begin
-                    //     M_AXIS_TVALID <= 1'b0;
-                    //     M_AXIS_TLAST  <= 1'b0;
-                    //     state         <= ST_IDLE;
-                    // end
                 end
                 //-------------------------------------
             endcase
