@@ -50,23 +50,25 @@ module neural_network_v1_0 #(
     localparam W_HID_COUNT    = (FEATURES + 1) * HIDDEN;     // total hidden layer weights (including bias for each neuron)
     localparam W_OUT_COUNT    = HIDDEN + 1;                  // total output layer weights (including bias)
     
-    localparam Idle            = 8'b1000_0000;
-    localparam Initialize      = 8'b0100_0000;
-    localparam Wait_Initialize = 8'b0010_0000;
-    localparam Compute_Hidden  = 8'b0001_0000;
-    localparam Wait_Hidden     = 8'b0000_1000;
-    localparam Compute_Output  = 8'b0000_0100;
-    localparam Wait_Output     = 8'b0000_0010;
-    localparam Store           = 8'b0000_0001;
+    localparam Idle            = 9'b1_0000_0000;
+    localparam Wait            = 9'b0_1000_0000;
+    localparam Initialize      = 9'b0_0100_0000;
+    localparam Wait_Initialize = 9'b0_0010_0000;
+    localparam Compute_Hidden  = 9'b0_0001_0000;
+    localparam Wait_Hidden     = 9'b0_0000_1000;
+    localparam Compute_Output  = 9'b0_0000_0100;
+    localparam Wait_Output     = 9'b0_0000_0010;
+    localparam Store           = 9'b0_0000_0001;
 
-    reg [7:0] state = Idle;
+    reg [8:0] state = Idle;
 
     reg [5:0] row;   // 0~63 (64 rows, 64 big loops)
     reg [2:0] col;   // 0~6  (at most 7 columns in the first stage)
     reg lookup_finished;
     reg [15:0] acc [0:HIDDEN-1]; // Two more bits to ensure no overflow occurs
 
-    reg [1:0] cnt;
+    reg cnt;
+    reg res;
     always @(posedge clk) begin
         if (Start) begin
             A_read_en    <= 1'b1;
@@ -80,7 +82,7 @@ module neural_network_v1_0 #(
             RES_write_en <= 1'b0;
             
             Done         <= 1'b0;
-            state        <= Initialize;
+            state        <= Wait;
             cnt          <= 0;
             acc[0]       <= 0;
             acc[1]       <= 0;
@@ -102,16 +104,26 @@ module neural_network_v1_0 #(
                     acc[1]           <= 0;
                 end
 
+                Wait: begin
+                    state <= Initialize;
+                end
+
                 Initialize: begin
                     // Bias term for each neuron
                     // acc[0]           <= {B_read_data_out_1, 8'b0};
                     // acc[1]           <= {B_read_data_out_2, 8'b0};
-                    acc[0]           <= (B_read_data_out_1 << 8);
-                    acc[1]           <= (B_read_data_out_2 << 8);
-                    B_read_address_1 <= B_read_address_1 + 2;
-                    B_read_address_2 <= B_read_address_2 + 2;
-
-                    state <= Wait_Initialize;
+//                    if (cnt == 1) begin
+                        acc[0]           <= (B_read_data_out_1 << 8);
+                        acc[1]           <= (B_read_data_out_2 << 8);
+                        B_read_address_1 <= B_read_address_1 + 2;
+                        B_read_address_2 <= B_read_address_2 + 2;
+                        
+                        cnt   <= 0;
+                        state <= Wait_Initialize;
+//                    end else begin
+//                        cnt <= cnt + 1;
+//                        state <= Initialize;
+//                    end
                 end
                 
                 Wait_Initialize: begin
@@ -141,7 +153,7 @@ module neural_network_v1_0 #(
                 
                 Compute_Output: begin
                     // Sigmoid Activation function
-                    if (lookup_finished == 0) begin    
+                    if (lookup_finished == 0) begin
                         Sigmoid_lookup_1 <= acc[0][15:8];
                         Sigmoid_lookup_2 <= acc[1][15:8]; // Overflow should be taken care of 
                         // acc[0]           <= {C_read_data_out_1, 8'b0};
@@ -171,10 +183,10 @@ module neural_network_v1_0 #(
                     RES_write_address <= row;
                     state <= Store;
                 end
-                
+
                 Store: begin
                     RES_write_en      <= 1'b1;
-                    RES_write_data_in <= (acc[0][15:8] > 8'b1000_0000) ? 1'b1 : 1'b0;
+                    RES_write_data_in <= (acc[0][15:8] >= 8'b1000_0000) ? 1'b1 : 1'b0;
                     
                     if (row == N - 1) begin
                         Done <= 1'b1;
@@ -186,6 +198,7 @@ module neural_network_v1_0 #(
                         A_read_address    <= A_read_address + 1;
                         B_read_address_1  <= 0;
                         B_read_address_2  <= 1;
+                        cnt               <= 0;
                         state             <= Initialize;
                     end
                 end
