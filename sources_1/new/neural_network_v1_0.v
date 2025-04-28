@@ -65,7 +65,7 @@ module neural_network_v1_0 #(
     reg [5:0] row;   // 0~63 (64 rows, 64 big loops)
     reg [2:0] col;   // 0~6  (at most 7 columns in the first stage)
     reg lookup_finished;
-    reg [15:0] acc [0:HIDDEN-1]; // Two more bits to ensure no overflow occurs
+    reg [15:0] acc [0:HIDDEN-1]; // More bits to ensure no overflow occurs?
 
     reg cnt;
     reg res;
@@ -105,25 +105,19 @@ module neural_network_v1_0 #(
                 end
 
                 Wait: begin
+                    // Wait for the first read to be valid
                     state <= Initialize;
                 end
 
                 Initialize: begin
                     // Bias term for each neuron
-                    // acc[0]           <= {B_read_data_out_1, 8'b0};
-                    // acc[1]           <= {B_read_data_out_2, 8'b0};
-//                    if (cnt == 1) begin
-                        acc[0]           <= (B_read_data_out_1 << 8);
-                        acc[1]           <= (B_read_data_out_2 << 8);
-                        B_read_address_1 <= B_read_address_1 + 2;
-                        B_read_address_2 <= B_read_address_2 + 2;
-                        
-                        cnt   <= 0;
-                        state <= Wait_Initialize;
-//                    end else begin
-//                        cnt <= cnt + 1;
-//                        state <= Initialize;
-//                    end
+                    acc[0]           <= (B_read_data_out_1 << 8);
+                    acc[1]           <= (B_read_data_out_2 << 8);
+                    B_read_address_1 <= B_read_address_1 + 2;
+                    B_read_address_2 <= B_read_address_2 + 2;
+                    
+                    cnt   <= 0;
+                    state <= Wait_Initialize;
                 end
                 
                 Wait_Initialize: begin
@@ -134,21 +128,26 @@ module neural_network_v1_0 #(
                     acc[0] <= acc[0] + A_read_data_out * B_read_data_out_1;
                     acc[1] <= acc[1] + A_read_data_out * B_read_data_out_2;
                     if (col == FEATURES - 1) begin
-                        col <= 0;
-                        state            <= Wait_Hidden;
+                        col              <= 0;
+                        lookup_finished  <= 1'b0;
+                        C_read_address_1 <= 0;
+                        cnt              <= 1;
                     end else begin
                         col              <= col + 1;
                         A_read_address   <= A_read_address + 1;
                         B_read_address_1 <= B_read_address_1 + 2;
                         B_read_address_2 <= B_read_address_2 + 2;
-                        state            <= Compute_Hidden; // Keep accumulating
+                        cnt              <= 0;
                     end
+                    state <= Wait_Hidden; // Wait for one cycle and keep accumulating
                 end
 
                 Wait_Hidden: begin
-                    lookup_finished  <= 1'b0;
-                    C_read_address_1 <= 0;
-                    state <= Compute_Output;
+                    if (cnt == 0) begin
+                        state <= Compute_Hidden;
+                    end else begin
+                        state <= Compute_Output;
+                    end
                 end
                 
                 Compute_Output: begin
@@ -163,30 +162,30 @@ module neural_network_v1_0 #(
                         C_read_address_2 <= 2;
                         lookup_finished  <= 1'b1;
                         cnt              <= 0;
-                        state            <= Compute_Output; 
-                    end else if (cnt == 1) begin
-                    // end else begin
-                        // Timing issue?
+//                        state            <= Wait_Output;
+                    end else begin // lookup has finished
+                        // Timing ?
                         acc[0] <= acc[0] + C_read_data_out_1 * Sigmoid_result_1
                                         + C_read_data_out_2 * Sigmoid_result_2;
-                        cnt <= 0;
-                        state <= Wait_Output;
-                    end else begin
-                        // WAIT cycle for ROM and C_read_data to be valid
-                        cnt <= cnt + 1;
-                        state <= Compute_Output;
-                    end 
+                        RES_write_address <= row;
+//                        state <= Wait_Output;
+                        cnt <= 1;
+                    end
+                    state <= Wait_Output;
                 end
 
                 Wait_Output: begin
-                    // acc[0] <= (acc[0] >> 8);
-                    RES_write_address <= row;
-                    state <= Store;
+                    if (cnt == 0) begin
+                        // WAIT cycle for ROM and C_read_data to be valid
+                        state <= Compute_Output;
+                    end else begin
+                        state <= Store;
+                    end
                 end
 
                 Store: begin
                     RES_write_en      <= 1'b1;
-                    RES_write_data_in <= (acc[0][15:8] >= 8'b1000_0000) ? 1'b1 : 1'b0;
+                    RES_write_data_in <= (acc[0][15:8] > 8'b1000_0000) ? 1'b1 : 1'b0;
                     
                     if (row == N - 1) begin
                         Done <= 1'b1;
@@ -199,7 +198,7 @@ module neural_network_v1_0 #(
                         B_read_address_1  <= 0;
                         B_read_address_2  <= 1;
                         cnt               <= 0;
-                        state             <= Initialize;
+                        state             <= Wait;
                     end
                 end
                 
